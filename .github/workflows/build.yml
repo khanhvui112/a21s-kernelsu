@@ -20,9 +20,8 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/CyraxVip/SM-A217F-Kernel.git kernel_src
 
-    - name: Clone KernelSU (older version for kernel 4.19 compat)
+    - name: Clone KernelSU
       run: |
-        # Use v0.9.5 — last version known to work on kernel 4.19 without MODULE_IMPORT_NS issue
         git clone https://github.com/tiann/KernelSU.git --depth=1 --branch v0.9.5 || \
           git clone https://github.com/tiann/KernelSU.git --depth=1
 
@@ -31,14 +30,20 @@ jobs:
         cd kernel_src
         ../KernelSU/kernel/setup.sh
 
-    - name: Patch KernelSU for kernel 4.19 (remove MODULE_IMPORT_NS)
+    - name: Patch KernelSU for kernel 4.19 compatibility
       run: |
         cd kernel_src
+        # Fix 1: MODULE_IMPORT_NS not in 4.19
         if [ -f drivers/kernelsu/core/init.c ]; then
-          # Comment out MODULE_IMPORT_NS line (incompatible with 4.19)
           sed -i 's|^MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)|//&|' drivers/kernelsu/core/init.c
-          grep -n "MODULE_IMPORT_NS" drivers/kernelsu/core/init.c || echo "patched"
         fi
+        # Fix 2: linux/pgtable.h was added in 5.8, use asm/pgtable.h for older kernels
+        find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i \
+          's|#include <linux/pgtable.h>|#include <asm/pgtable.h>|g' {} \;
+        # Verify patches
+        echo "--- after patches ---"
+        grep -rn "MODULE_IMPORT_NS\|pgtable.h" drivers/kernelsu/ | head -10
+        echo "---"
 
     - name: Build kernel (fail loudly)
       env:
