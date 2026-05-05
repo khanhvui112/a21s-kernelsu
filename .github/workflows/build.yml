@@ -8,25 +8,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout main
       uses: actions/checkout@v4
-      with:
-          lfs: true
 
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y bc bison flex build-essential ccache curl libelf-dev libssl-dev python3 python3-pip git lzop device-tree-compiler
+        sudo apt install -y bc bison flex build-essential ccache curl libelf-dev libssl-dev python3 python3-pip git lzop device-tree-compiler gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu clang lld llvm
 
-    - name: Extract Samsung kernel source
+    - name: Clone Samsung A21s kernel source
       run: |
-        rm -rf kernel_src
-        mkdir kernel_src
-        tar -xf Kernel.tar.gz -C kernel_src
+        git clone --depth=1 https://github.com/CyraxVip/SM-A217F-Kernel.git kernel_src
 
     - name: Clone KernelSU
       run: |
-        rm -rf KernelSU
         git clone https://github.com/tiann/KernelSU.git --depth=1
 
     - name: Apply KernelSU patch
@@ -35,15 +30,20 @@ jobs:
         ../KernelSU/kernel/setup.sh
 
     - name: Build kernel
+      env:
+        ARCH: arm64
+        SUBARCH: arm64
+        CROSS_COMPILE: aarch64-linux-gnu-
       run: |
         cd kernel_src
-        export ARCH=arm64
-        export SUBARCH=arm64
-        make vendor/a21sxx_defconfig
-        make -j$(nproc)
+        make exynos850-a21snsxx_defconfig
+        make -j$(nproc) Image 2>&1 | tail -200
 
     - name: Upload boot image
       uses: actions/upload-artifact@v4
       with:
         name: kernelSU-boot
-        path: kernel_src/arch/arm64/boot/Image
+        path: |
+          kernel_src/arch/arm64/boot/Image
+          kernel_src/arch/arm64/boot/Image.gz
+        if-no-files-found: warn
