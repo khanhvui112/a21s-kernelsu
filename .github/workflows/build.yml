@@ -20,30 +20,51 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/CyraxVip/SM-A217F-Kernel.git kernel_src
 
-    - name: Clone KernelSU
+    - name: Clone KernelSU (older version for kernel 4.19 compat)
       run: |
-        git clone https://github.com/tiann/KernelSU.git --depth=1
+        # Use v0.9.5 — last version known to work on kernel 4.19 without MODULE_IMPORT_NS issue
+        git clone https://github.com/tiann/KernelSU.git --depth=1 --branch v0.9.5 || \
+          git clone https://github.com/tiann/KernelSU.git --depth=1
 
     - name: Apply KernelSU patch
       run: |
         cd kernel_src
         ../KernelSU/kernel/setup.sh
 
-    - name: Build kernel
+    - name: Patch KernelSU for kernel 4.19 (remove MODULE_IMPORT_NS)
+      run: |
+        cd kernel_src
+        if [ -f drivers/kernelsu/core/init.c ]; then
+          # Comment out MODULE_IMPORT_NS line (incompatible with 4.19)
+          sed -i 's|^MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)|//&|' drivers/kernelsu/core/init.c
+          grep -n "MODULE_IMPORT_NS" drivers/kernelsu/core/init.c || echo "patched"
+        fi
+
+    - name: Build kernel (fail loudly)
       env:
         ARCH: arm64
         SUBARCH: arm64
         CROSS_COMPILE: aarch64-linux-gnu-
       run: |
+        set -euxo pipefail
         cd kernel_src
         make exynos850-a21snsxx_defconfig
-        make -j$(nproc) Image 2>&1 | tail -200
+        # Disable -Werror to survive minor warnings
+        scripts/config --file .config -d WERROR -d KCFLAGS_WERROR 2>/dev/null || true
+        make -j$(nproc) Image
+
+    - name: Show built artifacts
+      if: always()
+      run: |
+        ls -la kernel_src/arch/arm64/boot/ 2>&1 || true
+        find kernel_src -name "Image" -o -name "Image.gz" 2>&1 | head -10
 
     - name: Upload boot image
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: kernelSU-boot
         path: |
           kernel_src/arch/arm64/boot/Image
           kernel_src/arch/arm64/boot/Image.gz
-        if-no-files-found: warn
+        if-no-files-found: error
