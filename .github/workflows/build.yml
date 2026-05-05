@@ -20,10 +20,13 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/CyraxVip/SM-A217F-Kernel.git kernel_src
 
-    - name: Clone KernelSU
+    - name: Clone KernelSU (older version for 4.19 compat)
       run: |
-        git clone https://github.com/tiann/KernelSU.git --depth=1 --branch v0.9.5 || \
+        # Try v0.7.x first (best 4.19 compat), fallback to v0.9.5
+        git clone https://github.com/tiann/KernelSU.git --depth=1 --branch v0.7.10 || \
+          git clone https://github.com/tiann/KernelSU.git --depth=1 --branch v0.9.5 || \
           git clone https://github.com/tiann/KernelSU.git --depth=1
+        cd KernelSU && git log -1 --oneline
 
     - name: Apply KernelSU patch
       run: |
@@ -34,12 +37,14 @@ jobs:
       run: |
         cd kernel_src
         # Fix 1: MODULE_IMPORT_NS not in 4.19
-        if [ -f drivers/kernelsu/core/init.c ]; then
-          sed -i 's|^MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)|//&|' drivers/kernelsu/core/init.c
-        fi
-        # Fix 2: linux/pgtable.h was added in 5.8, use asm/pgtable.h for older kernels
+        find drivers/kernelsu -type f -name "*.c" -exec sed -i \
+          's|^MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver)|//&|' {} \;
+        # Fix 2: linux/pgtable.h was added in 5.8, use asm/pgtable.h on older kernels
         find drivers/kernelsu -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i \
           's|#include <linux/pgtable.h>|#include <asm/pgtable.h>|g' {} \;
+        # Fix 3: alloc_pages_node has different signature in older kernels
+        find drivers/kernelsu -type f -name "*.c" -exec sed -i \
+          's|memcg_cache_ids|/* &removed_4_19 */|g' {} \;
         # Verify patches
         echo "--- after patches ---"
         grep -rn "MODULE_IMPORT_NS\|pgtable.h" drivers/kernelsu/ | head -10
@@ -56,6 +61,7 @@ jobs:
         make exynos850-a21snsxx_defconfig
         # Disable -Werror to survive minor warnings
         scripts/config --file .config -d WERROR -d KCFLAGS_WERROR 2>/dev/null || true
+        # Build
         make -j$(nproc) Image
 
     - name: Show built artifacts
